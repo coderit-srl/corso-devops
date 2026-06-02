@@ -1,0 +1,17 @@
+# Web framework — handles routing, request parsing, response serialization
+fastapi==0.115.5
+
+# ASGI server — runs the FastAPI app (like Gunicorn, but async-native)
+uvicorn[standard]==0.32.1
+
+# Data validation library used by FastAPI for request/response models
+pydantic==2.10.3
+
+# Test runner — discovers and executes test files
+pytest==8.3.4
+
+# HTTP client used to call FastAPI endpoints in integration tests
+httpx==0.28.1
+
+# pytest plugin that measures which lines of code are executed during tests
+pytest-cov==6.0.0

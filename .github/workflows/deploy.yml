@@ -1,0 +1,41 @@
+name: CD — Deploy to Koyeb
+
+# This workflow is triggered by another workflow completing, not by a direct push.
+# workflow_run lets us chain workflows without coupling them in a single file.
+on:
+  workflow_run:
+    workflows: ["CI — Test, Build & Push"]   # must match the 'name:' field in ci.yml exactly
+    types: [completed]                        # fire when that workflow finishes (any result)
+    branches: [main]                          # only for runs triggered by main
+
+jobs:
+  deploy:
+    name: Deploy new image to Koyeb
+    runs-on: ubuntu-latest
+    # Guard: only deploy if CI actually succeeded — not if it was cancelled or failed.
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      # Install the official Koyeb CLI and configure it with our API token.
+      # KOYEB_API_TOKEN is a repository secret set in Settings → Secrets.
+      - name: Install Koyeb CLI
+        uses: koyeb-community/install-koyeb-cli@v2
+        with:
+          api_token: ${{ secrets.KOYEB_API_TOKEN }}
+
+      # Tell Koyeb to re-deploy the service using the new :latest image.
+      # --docker             → the new image URL (just published by CI)
+      # --docker-private-registry-secret → name of the GHCR credential stored in Koyeb
+      #                        (needed only if the GHCR package is private)
+      # --wait               → block until Koyeb reports the deployment healthy
+      #
+      # KOYEB_APP_NAME and KOYEB_SERVICE_NAME are repository secrets:
+      #   app name     = the name you gave the app in the Koyeb dashboard
+      #   service name = typically "web" for the main web service
+      - name: Deploy to Koyeb
+        run: |
+          koyeb service update \
+            ${{ secrets.KOYEB_APP_NAME }}/${{ secrets.KOYEB_SERVICE_NAME }} \
+            --docker ghcr.io/${{ github.repository }}:latest \
+            --docker-private-registry-secret ghcr-secret \
+            --wait

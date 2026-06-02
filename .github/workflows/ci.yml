@@ -1,0 +1,88 @@
+name: CI — Test, Build & Push
+
+# When to run this workflow.
+on:
+  push:
+    branches: [main]        # every commit pushed to main
+  pull_request:
+    branches: [main]        # every PR targeting main (tests run before merge)
+
+# Reusable variables — avoids repeating strings across steps.
+env:
+  REGISTRY: ghcr.io                        # GitHub Container Registry
+  IMAGE_NAME: ${{ github.repository }}     # e.g. "myuser/temperature-converter"
+
+jobs:
+
+  # ─── JOB 1: run the test suite ────────────────────────────────────────────
+  test:
+    name: Run unit tests
+    runs-on: ubuntu-latest   # GitHub-hosted runner with Ubuntu
+
+    steps:
+      # Download the repository content into the runner.
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Install the exact Python version we develop with.
+      # cache: "pip" stores downloaded packages between runs → faster CI.
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # Run pytest and print a coverage report.
+      # If any test fails, the step exits with a non-zero code → job fails →
+      # the build-and-push job below never starts.
+      - name: Run tests with coverage
+        run: pytest tests/ -v --cov=app --cov-report=term-missing
+
+  # ─── JOB 2: build the Docker image and push it to GHCR ───────────────────
+  build-and-push:
+    name: Build & push Docker image
+    runs-on: ubuntu-latest
+    needs: test                    # this job only starts if 'test' succeeded
+    if: github.ref == 'refs/heads/main'   # skip on PRs — only publish from main
+
+    permissions:
+      contents: read
+      packages: write              # required to push images to GHCR
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Authenticate to GHCR using the automatic GITHUB_TOKEN secret.
+      # GITHUB_TOKEN is created by GitHub for every workflow run — no setup needed.
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Generate two tags for the image:
+      #   latest    → always points to the most recent successful build
+      #   sha-<id>  → immutable tag tied to the exact commit (useful for rollbacks)
+      - name: Extract Docker metadata (tags & labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=sha-
+            type=raw,value=latest
+
+      # Build the image using the Dockerfile in the repo root, then push it.
+      # The tags and labels come from the previous step (referenced by id: meta).
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
